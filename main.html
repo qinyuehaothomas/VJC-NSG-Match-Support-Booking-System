@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <!-- Include external CSS -->
+    <?!= include('styles'); ?>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Match Support Allocation System</h1>
+
+      <!-- XML Upload Section -->
+      <section class="upload-section">
+        <h2>Upload Timetable (XML)</h2>
+        <input type="file" id="xmlFile" accept=".xml">
+        <button onclick="uploadXml()">Upload and Process</button>
+        <div id="uploadMessage"></div>
+      </section>
+
+      <!-- Two‑panel display -->
+      <div class="panels">
+        <!-- Page A: Class Schedule -->
+        <div class="panel">
+          <h2>Page A – Class Support Schedule</h2>
+          <table id="scheduleTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- Page B: Match Roster -->
+        <div class="panel">
+          <h2>Page B – Match Support Roster</h2>
+          <table id="rosterTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Include external JavaScript -->
+    <?!= include('script'); ?>
+  </body>
+</html>

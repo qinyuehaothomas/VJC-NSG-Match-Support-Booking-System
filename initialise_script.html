@@ -1,0 +1,75 @@
+<script>
+  /**
+   * Handles XML file upload, demonstrates basic parsing,
+   * and calls a placeholder processing function.
+   */
+  function uploadXml() {
+    const fileInput = document.getElementById('xmlFile');
+    const file = fileInput.files[0];
+    const statusDiv = document.getElementById('xmlStatus');
+
+    if (!file) {
+      statusDiv.innerHTML = '<span style="color:red;">Please select an XML file first.</span>';
+      return;
+    }
+
+    statusDiv.innerHTML = '<span style="color:blue;">Reading file...</span>';
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const xmlText = e.target.result;
+      
+      // Parse XML using DOMParser (browser built‑in)
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+
+      // Check for parsing errors
+      const parserError = xmlDoc.querySelector('parsererror');
+      if (parserError) {
+        statusDiv.innerHTML = '<span style="color:red;">Error parsing XML: ' + parserError.textContent + '</span>';
+        return;
+      }
+
+      // ---- DEMONSTRATE BASIC SYNTAX ----
+      // 1. Show root element name
+      const root = xmlDoc.documentElement;
+      let demoText = 'Root element: ' + root.tagName + '<br>';
+
+      // 2. Count and show some sample elements (e.g., all <lesson> tags)
+      const lessons = xmlDoc.getElementsByTagName('lesson');
+      demoText += 'Found <lesson> elements: ' + lessons.length + '<br>';
+
+      if (lessons.length > 0) {
+        // Show first lesson's attributes/content as example
+        const first = lessons[0];
+        demoText += 'First lesson: ' + (first.outerHTML.substring(0, 100) + '…') + '<br>';
+      }
+
+      // Display the demo info
+      statusDiv.innerHTML = '<span style="color:green;">XML loaded successfully.</span><br>' + demoText;
+
+      // ---- PLACEHOLDER PROCESSING FUNCTION ----
+      // Call your custom processing function (empty for now)
+      processExtractedData(xmlDoc);
+    };
+
+    reader.onerror = function() {
+      statusDiv.innerHTML = '<span style="color:red;">Failed to read file.</span>';
+    };
+
+    reader.readAsText(file);
+  }
+
+  /**
+   * Placeholder function for processing the XML data.
+   * You can later extract the timetable information here.
+   */
+  function processExtractedData(xmlDoc) {
+    // For now, just log to browser console
+    console.log('XML document is ready for processing.');
+    console.log('You can access elements like: ', xmlDoc.getElementsByTagName('lesson'));
+    
+    // Example: you might later extract class names, dates, times, etc.
+    // and send them to the server using google.script.run
+  }
+</script>
