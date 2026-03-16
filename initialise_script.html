@@ -1,9 +1,32 @@
 <script>
+  // Global variables to hold parsed timetable and class list
+  let Timetable = null;
+  let classList;
+
+  // Break periods – lessons with these subject names are ignored
+  let BREAK_NAME = [
+    "Mosque Break",
+    "Break 1",
+    "Break 2",
+    "HBL",
+    "PE(2) break",
+    "PE(1) break",
+    "HBL"
+  ];
+
+  // Automatically process XML when a file is chosen
+  document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('xmlFile');
+    if (fileInput) {
+      fileInput.addEventListener('change', processTimetable);
+    }
+  });
+
   /**
-   * Handles XML file upload, demonstrates basic parsing,
-   * and calls a placeholder processing function.
+   * Handles XML file upload, parses the file, and calls processXml().
+   * Updates status divs with progress messages.
    */
-  function uploadXml() {
+  function processTimetable() {
     const fileInput = document.getElementById('xmlFile');
     const file = fileInput.files[0];
     const statusDiv = document.getElementById('xmlStatus');
@@ -18,10 +41,10 @@
     const reader = new FileReader();
     reader.onload = function(e) {
       const xmlText = e.target.result;
-      
+
       // Parse XML using DOMParser (browser built‑in)
       const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+      const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
 
       // Check for parsing errors
       const parserError = xmlDoc.querySelector('parsererror');
@@ -30,27 +53,10 @@
         return;
       }
 
-      // ---- DEMONSTRATE BASIC SYNTAX ----
-      // 1. Show root element name
-      const root = xmlDoc.documentElement;
-      let demoText = 'Root element: ' + root.tagName + '<br>';
+      // Call the main processing function
+      processXml(xmlDoc);
 
-      // 2. Count and show some sample elements (e.g., all <lesson> tags)
-      const lessons = xmlDoc.getElementsByTagName('lesson');
-      demoText += 'Found <lesson> elements: ' + lessons.length + '<br>';
-
-      if (lessons.length > 0) {
-        // Show first lesson's attributes/content as example
-        const first = lessons[0];
-        demoText += 'First lesson: ' + (first.outerHTML.substring(0, 100) + '…') + '<br>';
-      }
-
-      // Display the demo info
-      statusDiv.innerHTML = '<span style="color:green;">XML loaded successfully.</span><br>' + demoText;
-
-      // ---- PLACEHOLDER PROCESSING FUNCTION ----
-      // Call your custom processing function (empty for now)
-      processExtractedData(xmlDoc);
+      statusDiv.innerHTML = '<span style="color:green;">Complete !</span>';
     };
 
     reader.onerror = function() {
@@ -61,15 +67,131 @@
   }
 
   /**
-   * Placeholder function for processing the XML data.
-   * You can later extract the timetable information here.
+   * Main XML processing function.
+   * Builds maps of subjects and classes, then creates a timetable structure.
+   * The result is stored in the global variables Timetable and classList.
+   *
+   * @param {XMLDocument} xmlDoc - The parsed XML document.
    */
-  function processExtractedData(xmlDoc) {
-    // For now, just log to browser console
-    console.log('XML document is ready for processing.');
-    console.log('You can access elements like: ', xmlDoc.getElementsByTagName('lesson'));
-    
-    // Example: you might later extract class names, dates, times, etc.
-    // and send them to the server using google.script.run
+  function processXml(xmlDoc) {
+    // Build subject and class maps from their respective tags
+    const subjects = new Map(
+      [...xmlDoc.getElementsByTagName('subject')].map(s => [
+        s.getAttribute('id'),
+        s.getAttribute('name')
+      ])
+    );
+    const classes = new Map(
+      [...xmlDoc.getElementsByTagName('class')].map(c => [
+        c.getAttribute('id'),
+        c.getAttribute('name')
+      ])
+    );
+
+    // Map lesson ID -> {classNames: string[], subjectName: string}
+    const lessons = new Map();
+    [...xmlDoc.getElementsByTagName('lesson')].forEach(lesson => {
+      // classids may contain multiple comma‑separated IDs
+      const classNames = lesson
+        .getAttribute('classids')
+        .split(',')
+        .map(id => classes.get(id.trim()))
+        .filter(Boolean);
+      const subjectName = subjects.get(lesson.getAttribute('subjectid'));
+
+      // Skip break periods (subject name in BREAK_NAME array)
+      if (BREAK_NAME.includes(subjectName)) return;
+
+      if (classNames.length && subjectName) {
+        lessons.set(lesson.getAttribute('id'), { classNames, subjectName });
+      }
+    });
+
+    // Timetable structure: className -> week -> day (0-4) -> [ [period, subjectName] ]
+    const timetable = {};
+
+    [...xmlDoc.getElementsByTagName('card')].forEach(card => {
+      const lesson = lessons.get(card.getAttribute('lessonid'));
+      if (!lesson) return;
+
+      const period = parseInt(card.getAttribute('period'));
+      const week = card.getAttribute('weeks');           // e.g. "1" or "1,2,3"
+      const day = card.getAttribute('days').indexOf('1'); // 0 = Monday, 4 = Friday
+      if (day === undefined) return;
+
+      if (week=="10") day+=7;
+
+      // Update once      
+      lesson.classNames.forEach(className => {
+        if (!timetable[className]) timetable[className] = {};
+        if (!timetable[className][day]) timetable[className][day] = [];
+
+        timetable[className][day].push([period, lesson.subjectName]);
+      });
+
+      if (week=="11"){
+        day+=7;
+        // Update Even Week for Common Scheudle
+        lesson.classNames.forEach(className => {
+          if (!timetable[className]) timetable[className] = {};
+          if (!timetable[className][day]) timetable[className][day] = [];
+          timetable[className][day].push([period, lesson.subjectName]);
+        });
+      }
+    });
+
+    // Store results globally
+    classList = Object.keys(timetable).sort();
+    Timetable = timetable;
+  }
+
+  /**
+   * Collects all inputs and sends them to the server‑side 'initialise' function.
+   * Called when the "Initialise System" button is clicked.
+   */
+  function sendInitialise() {
+    // Get classes from the global classList (populated by XML processing)
+    const classes = classList;
+
+    // Get sports from textarea (one per line)
+    const sportsText = document.getElementById('sports').value;
+    const sports = sportsText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+
+    // Get date from date picker
+    const termDate = document.getElementById('termDate').value;
+
+    // Get the parsed timetable data
+    const timetable = Timetable;
+
+    // Basic validation
+    if (sports.length === 0) {
+      alert('Please enter at least one sport.');
+      return;
+    }
+    if (!termDate) {
+      alert('Please select a date.');
+      return;
+    }
+    if (!timetable) {
+      alert('Please Upload Timetable !');
+      return;
+    }
+
+    // Show sending feedback
+    const statusDiv = document.getElementById('Status');
+    statusDiv.innerHTML = '<span style="color:blue;">Initialising...</span>';
+
+    // Call the server‑side 'initialise' function
+    google.script.run
+      .withSuccessHandler(() => {
+        statusDiv.innerHTML = '<span style="color:green;">Initialisation complete!</span>';
+      })
+      .withFailureHandler(error => {
+        statusDiv.innerHTML = '<span style="color:red;">Error: ' + error.message + '</span>';
+      })
+      .initialise(classes, sports, termDate, timetable);
   }
 </script>

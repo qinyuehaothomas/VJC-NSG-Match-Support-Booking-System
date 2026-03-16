@@ -1,393 +1,264 @@
-// ============================================================
-// create_sheet.js — Creates the Master Google Spreadsheet
-// ============================================================
+// init.js — Initialisation logic, called from initialisation via google.script.run
+//
+// Entry point: initialisation(classes, sports, termStartDate, timetableData)
+//   - classes       : string[]  — list of class names e.g. ["1A","1B"]
+//   - sports        : string[]  — list of sport names e.g. ["Basketball","Volleyball"]
+//   - termStartDate : string    — ISO date string of Term 2 Week 1 Monday e.g. "2025-03-10"
+//   - timetableData : object[]  — parsed timetable rows, processed client-side before sending
+//                                 Each row: { className, day (0–13), period, lesson }
 
-/**
- * Creates the Master Spreadsheet with all required tabs.
- * @param {string[]} classes - List of class names
- * @param {string[]} sports  - List of sport names
- * @returns {string} Spreadsheet ID
- */
-function createMasterSpreadsheet(classes, sports) {
-  const year = new Date().getFullYear();
-  const ss   = SpreadsheetApp.create(`NSG Match Support — Master ${year}`);
-  const ssId = ss.getId();
+// ---------------------------------------------------------------------------
+// Main initialisation function — called from client
+// ---------------------------------------------------------------------------
 
-  // ── Timetable tab ─────────────────────────────────────────
-  const timetableSheet = ss.getSheetByName('Sheet1');
-  timetableSheet.setName('Timetable');
-  timetableSheet.appendRow(['Class', 'Date', 'StartTime', 'EndTime', 'Subject']);
-  formatHeaderRow(timetableSheet, '#1a73e8');
+const CLASS_PREFERENCE_SHEET_NAME="Class Preference";
+const MATCH_DETAIL_SHEET_NAME="Match Details";
 
-  // ── Preference tab ────────────────────────────────────────
-  const prefSheet = ss.insertSheet('Preference');
-  // Headers will be set when the form is linked
-  formatHeaderRow(prefSheet, '#0f9d58');
-
-  // ── Matches tab ───────────────────────────────────────────
-  const matchSheet = ss.insertSheet('Matches');
-  matchSheet.appendRow([
-    'MatchID', 'Name', 'Sport', 'Date',
-    'EstimatedStartTime', 'EstimatedEndTime', 'EstimatedCapacity', 'Venue'
-  ]);
-  formatHeaderRow(matchSheet, '#f4b400');
-
-  // ── Allocation tab ────────────────────────────────────────
-  const allocSheet = ss.insertSheet('Allocation');
-  allocSheet.appendRow(['Class', 'MatchID']);
-  formatHeaderRow(allocSheet, '#db4437');
-
-  Logger.log('Master spreadsheet created: ' + ssId);
-  return ssId;
-}
-
-/**
- * Bold + colour the first row of a sheet.
- * @param {Sheet} sheet
- * @param {string} bgColor - Hex colour string
- */
-function formatHeaderRow(sheet, bgColor) {
-  const range = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 8);
-  range.setBackground(bgColor)
-       .setFontColor('#ffffff')
-       .setFontWeight('bold');
-  sheet.setFrozenRows(1);
-}
-
-// ============================================================
-// create_form.js — Creates Class Preference & Matches Google Forms
-// ============================================================
-
-/**
- * Creates both Google Forms and links them to the Master Spreadsheet.
- * @param {string[]} classes        - List of class names
- * @param {string[]} sports         - List of sport names
- * @param {string}   spreadsheetId  - Master spreadsheet ID
- * @returns {{ classPreference: string, matches: string }} Form IDs
- */
-function createForms(classes, sports, spreadsheetId) {
-  const ss = SpreadsheetApp.openById(spreadsheetId);
-
-  const prefFormId   = createClassPreferenceForm(classes, sports, ss);
-  const matchFormId  = createMatchesForm(sports, ss);
-
-  return {
-    classPreference: prefFormId,
-    matches:         matchFormId
-  };
-}
-
-// ── Class Preference Form ─────────────────────────────────────
-
-/**
- * Creates the Class Preference Google Form.
- * Q1: Class dropdown
- * Q2: Sport ranking (Multiple Choice Grid)
- * Q3: Classmate involvement (Checkboxes)
- * @returns {string} Form ID
- */
-function createClassPreferenceForm(classes, sports, ss) {
-  const form = FormApp.create('NSG Class Preference');
-  form.setDescription(
-    'Please fill in your class preferences for the National School Games.'
-  );
-  form.setCollectEmail(false);
-
-  // Q1 — Class (dropdown, required)
-  const q1 = form.addListItem();
-  q1.setTitle('Class')
-    .setChoiceValues(classes)
-    .setRequired(true);
-
-  // Q2 — Sport Ranking (Multiple Choice Grid)
-  // Rows = ranks 1..n, Columns = sports
-  const n    = sports.length;
-  const rows = Array.from({ length: n }, (_, i) => String(i + 1));
-
-  const q2 = form.addGridItem();
-  q2.setTitle('Rank your preferred sports (1 = most preferred)')
-    .setRows(rows)
-    .setColumns(sports)
-    .setRequired(true);
-
+function initialisation(classes, sports, termStartDate, timetableData) {
   try {
-    // Restrict one response per column (each sport ranked once)
-    q2.setValidation(
+    var year = new Date().getFullYear();
+
+    // Step 1: Create master spreadsheet
+    var spreadsheetId = createMasterSpreadsheet(classes, timetableData, year);
+
+    // Step 2: Create Class Preference form and link to master
+    var prefFormId = createClassPreferenceForm(classes, sports, spreadsheetId, year);
+
+    // Step 3: Create Match Info Update form and link to master
+    var matchFormId = createMatchUpdateForm(sports, spreadsheetId, year);
+
+    // Step 4: Save config to script properties
+    var config = {
+      year:          year,
+      termStartDate: termStartDate,
+      classes:       classes,
+      sports:        sports,
+      spreadsheetId: spreadsheetId,
+      forms: {
+        classPreference: prefFormId,
+        matchUpdate:     matchFormId
+      }
+    };
+    saveConfig(config);
+
+    // Step 5: Schedule async rename of form response sheets (avoids sleep delays)
+    scheduleFormSheetRename();
+
+    // Return success to client
+    return { success: true, spreadsheetId: spreadsheetId, prefFormId: prefFormId, matchFormId: matchFormId };
+
+  } catch (e) {
+    // Return failure details to client
+    return { success: false, error: e.message };
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Create Master Spreadsheet
+// ---------------------------------------------------------------------------
+function createMasterSpreadsheet(classes, timetableData, year) {
+  var ss = SpreadsheetApp.create(year + ' VJC NSG Allocation System Database');
+
+  // ── Allocation tab ───────────────────────────────────────────────────────
+  // Stores final decisions: one row per class-match pairing
+  var allocationSheet = ss.getSheetByName('Sheet1'); // rename the default sheet
+  allocationSheet.setName('Allocation');
+  allocationSheet.appendRow(['Class', 'Match']);
+
+  // ── One timetable tab per class ──────────────────────────────────────────
+  // Tab name: "<ClassName> Timetable"
+  // Row 1 (header): ["Day", "Period 0", "Period 1", ..., "Period 28"]
+  // Rows 2–15: one row per day (Day 0 to Day 13), displayed as Day 1 to Day 14
+  // Column 1: day names, Columns 2–30: periods 0–28
+  // Cells contain lesson name; multiple lessons in same period are comma-separated
+  classes.forEach(function(className) {
+    var classSheet = ss.insertSheet(className + ' Timetable');
+
+    // Build heading row: ["Day", "Period 0", "Period 1", ..., "Period 28"]
+    var headingRow = ['Day'];
+    for (var p = 0; p <= 28; p++) {
+      headingRow.push('Period ' + p);
+    }
+    classSheet.appendRow(headingRow);
+
+    // Build 14 day rows (Day 0 to Day 13)
+    // grid[day][period] holds an array of lesson names (for comma-join)
+    var grid = [];
+    for (var d = 0; d < 14; d++) {
+      grid[d] = [];
+      for (var p = 0; p <= 28; p++) {
+        grid[d][p] = [];
+      }
+    }
+
+    // Populate grid from timetable data
+    // timetableData format: { className: { days: [ [period, lesson], ... ] } }
+    if (timetableData[className] && timetableData[className].days) {
+      var classDays = timetableData[className].days;
+      
+      // Iterate through each day (0-13)
+      for (var d = 0; d < classDays.length && d < 14; d++) {
+        var dayLessons = classDays[d];
+        
+        // dayLessons is an array of [period, lesson] tuples
+        if (Array.isArray(dayLessons)) {
+          for (var i = 0; i < dayLessons.length; i++) {
+            var tuple = dayLessons[i];
+            var period = tuple[0]; // 0-indexed
+            var lesson = tuple[1];
+            
+            if (period >= 0 && period <= 28) {
+              grid[d][period].push(lesson);
+            }
+          }
+        }
+      }
+    }
+
+    // Write each day row to the sheet
+    for (var d = 0; d < 14; d++) {
+      var dataRow = ['Day ' + (d + 1)]; // Display as Day 1 to Day 14
+      for (var p = 0; p <= 28; p++) {
+        dataRow.push(grid[d][p].join(', ')); // comma-separated if multiple lessons
+      }
+      classSheet.appendRow(dataRow);
+    }
+  });
+
+  return ss.getId();
+}
+
+
+// ---------------------------------------------------------------------------
+// Create Class Preference Google Form
+// ---------------------------------------------------------------------------
+function createClassPreferenceForm(classes, sports, spreadsheetId, year) {
+  var form = FormApp.create(year + ' Match Support Class Preference');
+  form.setDescription('Fill this in to indicate your class preferences for NSG match support.');
+
+  // Q1 — Class selection (dropdown, required)
+  form.addListItem()
+      .setTitle('Class')
+      .setChoiceValues(classes)
+      .setRequired(true);
+
+  // Q2 — Sport ranking grid
+  // Rows = sports, Columns = rank numbers (1 to n)
+  // "Require one response per row" and "Limit to one response per column"
+  // ensures each sport gets a unique rank
+  var rankLabels = sports.map(function(_, i) { return String(i + 1); });
+  var rankGrid   = form.addGridItem();
+  rankGrid.setTitle('Rank each sport (1 = most preferred, no duplicates)')
+          .setRows(sports)
+          .setColumns(rankLabels)
+          .setRequired(true);
+  try {
+    rankGrid.setValidation(
       FormApp.createGridValidation()
         .requireLimitOneResponsePerColumn()
         .build()
     );
   } catch (e) {
-    Logger.log('Grid validation not supported in this context: ' + e);
+    Logger.log('Grid validation not supported: ' + e.message);
   }
 
-  // Q3 — Classmate Involvement (Checkboxes, not required)
-  const q3 = form.addCheckboxItem();
-  q3.setTitle('Which sports have classmates participating in?')
-    .setChoiceValues(sports)
-    .setRequired(false);
+  // Q3 — Classmate involvement checkboxes (not required)
+  form.addCheckboxItem()
+      .setTitle('Which sports have members of your class participating in?')
+      .setChoiceValues(sports)
+      .setRequired(false);
 
-  // Link to Preference sheet
-  const prefSheet = ss.getSheetByName('Preference');
-  form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
-  // Move the linked sheet to the 'Preference' position
-  Utilities.sleep(2000); // Give Forms time to create the linked sheet
-  renameLinkedFormSheet(ss, form.getId(), 'Preference');
+  // Link form responses to the master spreadsheet
+  form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheetId);
 
-  Logger.log('Class Preference Form created: ' + form.getId());
   return form.getId();
 }
 
-// ── Matches Form ──────────────────────────────────────────────
 
-/**
- * Creates the Matches Google Form.
- * Questions: Name, Sport, Date, Est Start Time, Est End Time, Est Capacity
- * @returns {string} Form ID
- */
-function createMatchesForm(sports, ss) {
-  const form = FormApp.create('NSG Match Entry');
-  form.setDescription(
-    'Enter details for each National School Games match.'
-  );
-  form.setCollectEmail(false);
+// ---------------------------------------------------------------------------
+// Create Match Info Update Google Form
+// ---------------------------------------------------------------------------
+function createMatchUpdateForm(sports, spreadsheetId, year) {
+  var form = FormApp.create(year + ' NSG Match Info Update');
+  form.setDescription('Use this form to add or update NSG match details.');
 
-  // Match Name (Short answer, required)
+  // Q1 — Match name (short answer, required)
   form.addTextItem()
-      .setTitle('Match Name / Description')
+      .setTitle('Match Name')
       .setRequired(true);
 
-  // Sport (Multiple Choice, required)
+  // Q2 — Sport (multiple choice from sports list, required)
   form.addMultipleChoiceItem()
       .setTitle('Sport')
       .setChoiceValues(sports)
       .setRequired(true);
 
-  // Date (Date question, required)
+  // Q3 — Estimated number of classes attending (short answer, required)
+  form.addTextItem()
+      .setTitle('Estimated Number of Classes')
+      .setRequired(true);
+
+  // Q4 — Match date (date picker, required)
   form.addDateItem()
       .setTitle('Date')
       .setRequired(true);
 
-  // Estimated Start Time (Time question, required)
+  // Q5 — Estimated leave time (time picker, required)
   form.addTimeItem()
-      .setTitle('Estimated Start Time')
+      .setTitle('Estimated Leave Time')
       .setRequired(true);
 
-  // Estimated End Time (Time question, required)
+  // Q6 — Estimated return time (time picker, required)
   form.addTimeItem()
-      .setTitle('Estimated End Time')
+      .setTitle('Estimated Return Time')
       .setRequired(true);
 
-  // Estimated Capacity (Short answer with number validation, required)
-  const capItem = form.addTextItem();
-  capItem.setTitle('Estimated Capacity (number of students)')
-         .setRequired(true);
-  try {
-    capItem.setValidation(
-      FormApp.createTextValidation()
-        .requireNumberGreaterThan(0)
-        .build()
-    );
-  } catch (e) {
-    Logger.log('Capacity validation skipped: ' + e);
-  }
+  // Link form responses to the master spreadsheet
+  form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheetId);
 
-  // Venue (Short answer, optional — can be updated later)
-  form.addTextItem()
-      .setTitle('Venue (leave blank if TBC)')
-      .setRequired(false);
-
-  // Link to Matches sheet
-  form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
-  Utilities.sleep(2000);
-  renameLinkedFormSheet(ss, form.getId(), 'Matches');
-
-  // Add MatchID formula to the sheet after linking
-  addMatchIdColumn(ss);
-
-  Logger.log('Matches Form created: ' + form.getId());
   return form.getId();
 }
 
-// ── Helper ────────────────────────────────────────────────────
 
-/**
- * After a Form is linked to a spreadsheet, Google creates a new sheet
- * named "Form Responses N". This renames it to the target name.
- */
-function renameLinkedFormSheet(ss, formId, targetName) {
-  const sheets = ss.getSheets();
-  for (const sheet of sheets) {
-    const name = sheet.getName();
-    if (name.startsWith('Form Responses')) {
-      // Check if this sheet is linked to our form
-      try {
-        const form = FormApp.openById(formId);
-        if (form.getDestinationId() === ss.getId()) {
-          // Remove old sheet with target name if it exists
-          const existing = ss.getSheetByName(targetName);
-          if (existing && existing.getSheetId() !== sheet.getSheetId()) {
-            ss.deleteSheet(existing);
-          }
-          sheet.setName(targetName);
-          return;
-        }
-      } catch (e) {
-        Logger.log('renameLinkedFormSheet error: ' + e);
-      }
+// ---------------------------------------------------------------------------
+// Schedule async renaming of form response sheets
+// Runs 2 minutes after initialisation, avoids blocking the main function with sleep()
+// ---------------------------------------------------------------------------
+function scheduleFormSheetRename() {
+  ScriptApp.newTrigger('renameFormResponseSheets')
+    .timeBased()
+    .after(2 * 60 * 1000) // 2 minutes in milliseconds
+    .create();
+}
+
+// Triggered ~2 minutes after initialisation
+// Finds each form's response sheet by form ID and renames it to the correct tab name
+// Then deletes the placeholder tabs created during spreadsheet setup
+function renameFormResponseSheets() {
+  var config = loadConfig();
+  var ss     = SpreadsheetApp.openById(config.spreadsheetId);
+
+  // Rename the form response sheets using form ID (stable, not dependent on tab name)
+  getFormResponseSheet(ss, config.forms.classPreference).setName(CLASS_PREFERENCE_SHEET_NAME);
+  getFormResponseSheet(ss, config.forms.matchUpdate).setName(MATCH_DETAIL_SHEET_NAME);
+
+  // Clean up this trigger so it does not run again
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'renameFormResponseSheets') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+}
+
+// Returns the sheet in ss whose linked form URL contains the given formId
+function getFormResponseSheet(ss, formId) {
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    var url = sheets[i].getFormUrl();
+    if (url && url.indexOf(formId) !== -1) {
+      return sheets[i];
     }
   }
+  throw new Error('No response sheet found for form ID: ' + formId);
 }
-
-/**
- * Adds a MatchID auto-formula column to the Matches sheet.
- * MatchID = "M" + row number, computed via formula.
- */
-function addMatchIdColumn(ss) {
-  Utilities.sleep(1000);
-  const sheet = ss.getSheetByName('Matches');
-  if (!sheet) return;
-
-  // Insert MatchID as the first column
-  sheet.insertColumnBefore(1);
-  sheet.getRange(1, 1).setValue('MatchID');
-  formatHeaderRow(sheet, '#f4b400');
-
-  // Add formula from row 2 onwards (up to 1000 responses)
-  const formula = '=IF(B2<>"","M"&ROW()-1,"")';
-  sheet.getRange(2, 1).setFormula(formula);
-  // Auto-fill pattern hint — users can extend or we can do it in allocation
-}
-
-// ============================================================
-// create_site.js — Creates the Google Site with all pages
-// ============================================================
-
-/**
- * Creates the NSG Match Support Google Site.
- * Pages: Main, View/ByClass, View/ByEvent,
- *        Update/ClassPreference, Update/Timetable, Update/Matches
- *
- * NOTE: Google Sites (new) has limited Apps Script API support.
- * This function creates a Classic Google Sites structure.
- * If your domain uses New Google Sites, see the fallback comment below.
- *
- * @param {{ classPreference: string, matches: string }} formIds
- * @param {string} spreadsheetId
- * @returns {string} Site URL
- */
-function createSite(formIds, spreadsheetId) {
-  const year  = new Date().getFullYear();
-  const name  = `NSG Match Support ${year}`;
-
-  let site;
-  try {
-    site = SitesApp.createSite('', slugify(name), name,
-      'National School Games — Match Support Management Portal');
-  } catch (e) {
-    // If domain-level creation is restricted, create under user sites
-    try {
-      site = SitesApp.createSite(name, name,
-        'National School Games — Match Support Management Portal');
-    } catch (e2) {
-      Logger.log('Site creation failed: ' + e2 +
-        '\nFalling back to returning a placeholder URL.');
-      // Return a note — teacher can manually create site and embed the HTML
-      return 'SITE_CREATION_FAILED__SEE_LOG';
-    }
-  }
-
-  // ── Main (navigation) page ─────────────────────────────────
-  const mainPage = site.getRootPage();
-  mainPage.setName('Main');
-  mainPage.setPageContent(buildMainPageHtml(site, year));
-
-  // ── View / ByClass ─────────────────────────────────────────
-  const byClassPage = site.createAnnouncementsPage('ByClass'); // reuse WebPage
-  // Actually use createWebPage for content pages:
-  site.createWebPage('ByClass', 'ByClass',
-    buildEmbedPageHtml('DisplayByClass',
-      getScriptUrl(),
-      'View Schedule by Class'));
-
-  // ── View / ByEvent ─────────────────────────────────────────
-  site.createWebPage('ByEvent', 'ByEvent',
-    buildEmbedPageHtml('DisplayByEvent',
-      getScriptUrl(),
-      'View Schedule by Event'));
-
-  // ── Update / ClassPreference ───────────────────────────────
-  const prefFormUrl = FormApp.openById(formIds.classPreference).getPublishedUrl();
-  site.createWebPage('ClassPreference', 'ClassPreference',
-    buildFormEmbedHtml(prefFormUrl, 'Class Preference'));
-
-  // ── Update / Timetable ─────────────────────────────────────
-  site.createWebPage('Timetable', 'Timetable',
-    buildTimetableEmbedHtml(getScriptUrl()));
-
-  // ── Update / Matches ──────────────────────────────────────
-  const matchFormUrl = FormApp.openById(formIds.matches).getPublishedUrl();
-  site.createWebPage('Matches', 'Matches',
-    buildFormEmbedHtml(matchFormUrl, 'Match Entry'));
-
-  const siteUrl = site.getUrl();
-  Logger.log('Site created: ' + siteUrl);
-  return siteUrl;
-}
-
-// ── Page HTML builders ────────────────────────────────────────
-
-function buildMainPageHtml(site, year) {
-  return `
-<h1>NSG Match Support ${year}</h1>
-<p>Welcome to the National School Games Match Support Management Portal.</p>
-<h2>Navigation</h2>
-<ul>
-  <li><a href="ByClass">📅 View Schedule by Class</a></li>
-  <li><a href="ByEvent">🏅 View Schedule by Event</a></li>
-  <li><a href="ClassPreference">📝 Update Class Preference</a></li>
-  <li><a href="Timetable">📤 Upload Timetable</a></li>
-  <li><a href="Matches">➕ Add / Update Match</a></li>
-</ul>`;
-}
-
-function buildEmbedPageHtml(functionName, scriptUrl, title) {
-  return `
-<h2>${title}</h2>
-<iframe src="${scriptUrl}?page=${functionName}"
-  width="100%" height="800"
-  style="border:none;"></iframe>`;
-}
-
-function buildFormEmbedHtml(formUrl, title) {
-  return `
-<h2>${title}</h2>
-<iframe src="${formUrl}?embedded=true"
-  width="100%" height="900"
-  frameborder="0" marginheight="0" marginwidth="0">
-  Loading…
-</iframe>`;
-}
-
-function buildTimetableEmbedHtml(scriptUrl) {
-  return `
-<h2>Upload Timetable</h2>
-<iframe src="${scriptUrl}?page=Timetable"
-  width="100%" height="700"
-  style="border:none;"></iframe>`;
-}
-
-// ── Utilities ─────────────────────────────────────────────────
-
-function slugify(str) {
-  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
-
-/**
- * Returns the deployed web app URL for this script.
- * In production this will be the /exec URL; during development it may be /dev.
- */
-function getScriptUrl() {
-  return ScriptApp.getService().getUrl();
-}
-

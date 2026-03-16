@@ -6,8 +6,6 @@
   <body>
     <h2>Timetable & Match Setup</h2>
 
-    <!-- Class list processed from XML -->
-
     <!-- Text field 1: sport names (one per line) -->
     <label for="sports">Sports (one per line):</label><br>
     <textarea id="sports" rows="5" cols="30" placeholder="e.g.&#10;Basketball Boys&#10;Basketball Girls&#10;Netball"></textarea>
@@ -16,165 +14,20 @@
     <!-- Field 2: XML upload button -->
     <label for="xmlFile">Upload timetable XML:</label><br>
     <input type="file" id="xmlFile" accept=".xml">
-    <div  id="xmlStatus">Timetable Not Loaded</div>
+    <div id="xmlStatus">Timetable Not Loaded</div>
     <br><br>
 
     <!-- Field 3: Date for Term 2 Week 1 Day 1 -->
-    <label for="termDate">Term 2 Week 1 Day 1 date:</label>
+    <label for="termDate">Term 2 Week 1 Monday date:</label>
     <input type="date" id="termDate">
     <br><br>
     <br>
 
     <button onclick="sendInitialise()">Initialise System</button>
+    <br>
+    <div id="Status"></div>
 
     <!-- Include client‑side JavaScript -->
     <?!= include('initialise_script'); ?>
-
-    <script>
-    
-    let extractedTimetableData = null;
-
-    // Automatically process XML when a file is chosen
-    document.addEventListener('DOMContentLoaded', function() {
-      const fileInput = document.getElementById('xmlFile');
-      if (fileInput) {
-        fileInput.addEventListener('change', processTimetable);
-      }
-    });
-
-    /**
-    * Handles XML file upload, demonstrates basic parsing,
-    * and calls a placeholder processing function.
-    */
-    function processTimetable() {
-      const fileInput = document.getElementById('xmlFile');
-      const file = fileInput.files[0];
-      const statusDiv = document.getElementById('xmlStatus');
-
-      if (!file) {
-        statusDiv.innerHTML = '<span style="color:red;">Please select an XML file first.</span>';
-        return;
-      }
-
-      statusDiv.innerHTML = '<span style="color:blue;">Reading file...</span>';
-
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const xmlText = e.target.result;
-        
-        // Parse XML using DOMParser (browser built‑in)
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
-
-        // Check for parsing errors
-        const parserError = xmlDoc.querySelector('parsererror');
-        if (parserError) {
-          statusDiv.innerHTML = '<span style="color:red;">Error parsing XML: ' + parserError.textContent + '</span>';
-          return;
-        }
-
-        // ----  PROCESSING FUNCTION ----
-        // Call processing function
-
-        processXml(xmlDoc);
-        
-        statusDiv.innerHTML = '<span style="color:green;">Complete !</span>';
-      };
-
-      reader.onerror = function() {
-        statusDiv.innerHTML = '<span style="color:red;">Failed to read file.</span>';
-      };
-
-      reader.readAsText(file);
-    }
-
-    function processXml(xmlDoc) {
-      // Build subject and class maps
-      const subjects = new Map([...xmlDoc.getElementsByTagName('subject')].map(s => [s.getAttribute('id'), s.getAttribute('name')]));
-      const classes = new Map([...xmlDoc.getElementsByTagName('class')].map(c => [c.getAttribute('id'), c.getAttribute('name')]));
-
-      // Map lesson ID -> {classNames: string[], subjectName: string}
-      const lessons = new Map();
-      [...xmlDoc.getElementsByTagName('lesson')].forEach(lesson => {
-        const classNames = lesson.getAttribute('classids').split(',').map(id => classes.get(id.trim())).filter(Boolean);
-        const subjectName = subjects.get(lesson.getAttribute('subjectid'));
-        if (classNames.length && subjectName) lessons.set(lesson.getAttribute('id'), {classNames, subjectName});
-      });
-
-      // const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-      const timetable = {};
-
-      [...xmlDoc.getElementsByTagName('card')].forEach(card => {
-        const lesson = lessons.get(card.getAttribute('lessonid'));
-        if (!lesson) return;
-        const period = parseInt(card.getAttribute('period'));
-        const week = card.getAttribute('weeks');
-        const day = card.getAttribute('days').indexOf('1');
-        if (day === undefined) return;
-
-        
-        lesson.classNames.forEach(className => {
-          if (!timetable[className]) timetable[className] = {};
-          if (!timetable[className][week]) timetable[className][week] = {};
-          if (!timetable[className][week][day]) timetable[className][week][day] = [];
-          timetable[className][week][day].push([period, lesson.subjectName]);
-  
-        });
-    });
-
-  extractedTimetableData = { classData: timetable, classList: Object.keys(timetable).sort() };
-}
-    /**
-    * Collect all inputs and send to the backend 'initialise' function.
-    * Call this when the Initialise button is pressed.
-    */
-    function sendInitialise() {
-      // Get classes (split by newline, filter out empty lines)
-      const classesText = document.getElementById('classes').value;
-      const classes = classesText.split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-
-      // Get sports (same)
-      const sportsText = document.getElementById('sports').value;
-      const sports = sportsText.split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-
-      // Get date
-      const termDate = document.getElementById('termDate').value;
-
-      // Get the parsed timetable data (could be null if not yet uploaded)
-      const timetable = extractedTimetableData || [];
-
-      // Basic validation
-      if (classes.length === 0) {
-        alert('Please enter at least one class.');
-        return;
-      }
-      if (sports.length === 0) {
-        alert('Please enter at least one sport.');
-        return;
-      }
-      if (!termDate) {
-        alert('Please select a date.');
-        return;
-      }
-
-      // Show sending feedback
-      const statusDiv = document.getElementById('xmlStatus'); // reuse the same status div
-      statusDiv.innerHTML = '<span style="color:blue;">Initialising...</span>';
-
-      // Call the server-side 'initialise' function
-      google.script.run
-        .withSuccessHandler(() => {
-          statusDiv.innerHTML = '<span style="color:green;">Initialisation complete!</span>';
-        })
-        .withFailureHandler((error) => {
-          statusDiv.innerHTML = '<span style="color:red;">Error: ' + error.message + '</span>';
-        })
-        .initialise(classes, sports, termDate, timetable);
-    }
-    </script>
   </body>
 </html>
