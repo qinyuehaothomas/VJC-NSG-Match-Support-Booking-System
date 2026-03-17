@@ -36,12 +36,14 @@ function initialisation(classes, sports, termStartDate, timetableData) {
     
     props.setProperty('year', year.toString());
     props.setProperty('termStartDate', termStartDate.toString());
-    Logger.log(termStartDate);
     props.setProperty('classes', classes.toString());
     props.setProperty('sports', sports.toString());
     props.setProperty('spreadsheetId', spreadsheetId);
     props.setProperty('classPreferenceFormId', prefFormId);
     props.setProperty('matchUpdateFormId', matchFormId);
+
+    // Step 4: Create form submission triggers
+    createFormSubmissionTriggers(prefFormId, matchFormId);
 
     // Step 5: Schedule async rename of form response sheets (avoids sleep delays)
     scheduleFormSheetRename();
@@ -59,6 +61,7 @@ function initialisation(classes, sports, termStartDate, timetableData) {
 // ---------------------------------------------------------------------------
 // Create Master Spreadsheet
 // ---------------------------------------------------------------------------
+
 function createMasterSpreadsheet(classes, timetableData, year) {
   // throw new Error(timetableData);
   var ss = SpreadsheetApp.create(year + ' VJC NSG Allocation System Database');
@@ -76,7 +79,7 @@ function createMasterSpreadsheet(classes, timetableData, year) {
   // Column 1: day names, Columns 2–30: periods 0–28
   // Cells contain lesson name; multiple lessons in same period are comma-separated
   Object.entries(timetableData).forEach(([className,classLessons])=> {
-    // throw new Error(className,classLessons);
+
     var classSheet = ss.insertSheet(className + ' Timetable');
 
     // Build heading row: ["Day", "Period 0", "Period 1", ..., "Period 28"]
@@ -90,14 +93,22 @@ function createMasterSpreadsheet(classes, timetableData, year) {
     // timetableData format: { className: [[lesson 1, lesson 2],[...],[...],...] }
 
     // Write each day row to the sheet
-    for (var d = 0; d < 14; d++) {
-      var dataRow = Array(30).fill(String());
-      dataRow[0]='Day ' + (d + 1); // Display as Day 1 to Day 14
-      classLessons.forEach((idx, lesson_name)=>{
-        dataRow[idx]+= dataRow[idx]?","+lesson_name:lesson_name;
+    for(let d =0; d<14;d++){
+      let dataRow = Array(30).fill("");
+      
+      dataRow[0]='Day ' + (parseInt(d) + 1); // Display as Day 1 to Day 14
+      
+      if(classLessons[d]) Object.entries(classLessons[d]).forEach(([idx,lesson_name])=>{
+        
+        if (!dataRow[idx].split(',').includes(lesson_name)){
+          dataRow[idx]+= dataRow[idx]?","+lesson_name:lesson_name;
+        }
       });
+      
+      
       classSheet.appendRow(dataRow);
-    }
+      }
+  
   });
 
   return ss.getId();
@@ -210,12 +221,14 @@ function scheduleFormSheetRename() {
 // Finds each form's response sheet by form ID and renames it to the correct tab name
 // Then deletes the placeholder tabs created during spreadsheet setup
 function renameFormResponseSheets() {
-  
-  const scriptProperties = PropertiesService.getScriptProperties();
-  const config = scriptProperties.getProperties();
+  const props = PropertiesService.getScriptProperties();
+
+  // Get a single property
+  const spreadsheetId = props.getProperty('spreadsheetId');
+  const ss=SpreadsheetApp.openById(spreadsheetId)
   // Rename the form response sheets using form ID (stable, not dependent on tab name)
-  getFormResponseSheet(ss, config["classPreferenceFormId"]).setName(CLASS_PREFERENCE_SHEET_NAME);
-  getFormResponseSheet(ss, config["matchUpdateFormId"]).setName(MATCH_DETAIL_SHEET_NAME);
+  getFormResponseSheet(ss, props.getProperty("classPreferenceFormId")).setName(CLASS_PREFERENCE_SHEET_NAME);
+  getFormResponseSheet(ss, props.getProperty("matchUpdateFormId")).setName(MATCH_DETAIL_SHEET_NAME);
 
   // Clean up this trigger so it does not run again
   ScriptApp.getProjectTriggers().forEach(function(trigger) {
@@ -230,9 +243,57 @@ function getFormResponseSheet(ss, formId) {
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
     var url = sheets[i].getFormUrl();
-    if (url && url.indexOf(formId) !== -1) {
+    if (url && url.includes(formId)) {
       return sheets[i];
     }
   }
   throw new Error('No response sheet found for form ID: ' + formId);
+}
+
+// ---------------------------------------------------------------------------
+// Form submission triggers — called automatically on form submit
+// ---------------------------------------------------------------------------
+
+function createFormSubmissionTriggers(classPreferenceFormId, matchUpdateFormId) {
+  try {
+    // Open forms to get Form objects
+    const classForm = FormApp.openById(classPreferenceFormId);
+    const matchForm = FormApp.openById(matchUpdateFormId);
+    
+    // Create trigger for Class Preference form
+    ScriptApp.newTrigger('onClassPreferenceSubmit')
+      .forForm(classForm)
+      .onFormSubmit()
+      .create();
+    Logger.log('Created trigger for Class Preference form');
+    
+    // Create trigger for Match Update form
+    ScriptApp.newTrigger('onMatchUpdateSubmit')
+      .forForm(matchForm)
+      .onFormSubmit()
+      .create();
+    Logger.log('Created trigger for Match Update form');
+  } catch (e) {
+    Logger.log('Failed to create form triggers: ' + e.message);
+  }
+}
+
+// Triggered when Class Preference form is submitted
+function onClassPreferenceSubmit(e) {
+  Logger.log('Class Preference form submitted');
+  try {
+    allocation();
+  } catch (error) {
+    Logger.log('Error in onClassPreferenceSubmit: ' + error.message);
+  }
+}
+
+// Triggered when Match Update form is submitted
+function onMatchUpdateSubmit(e) {
+  Logger.log('Match Update form submitted');
+  try {
+    allocation();
+  } catch (error) {
+    Logger.log('Error in onMatchUpdateSubmit: ' + error.message);
+  }
 }

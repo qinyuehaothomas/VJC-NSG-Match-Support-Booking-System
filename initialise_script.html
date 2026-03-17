@@ -119,27 +119,44 @@
       var day = card.getAttribute('days').indexOf('1'); // 0 = Monday, 4 = Friday
       if (day === undefined) return;
 
-      if (week=="10") day+=7;
+      if (week==="10") day+=7;
 
       // Update once      
       lesson.classNames.forEach(className => {
-        if (!timetable[className]) timetable[className] = Array(14).fill([]);
+        if (!timetable[className]) timetable[className] = {};
+        if (!timetable[className][day]) timetable[className][day] = {};
 
-        timetable[className][day].push([period, lesson.subjectName]);
+        if (timetable[className][day][period]) {
+          // Already exists → append with comma
+          timetable[className][day][period] += ',' + lesson.subjectName;
+        } else {
+          // Doesn't exist → set directly
+          timetable[className][day][period] = lesson.subjectName;
+        }
       });
 
-      if (week=="11"){
-        day+=7;
+      if (week==="11"){
+        day+=7; 
         // Update Even Week for Common Scheudle
         lesson.classNames.forEach(className => {
-        if (!timetable[className]) timetable[className] = Array(14).fill([]);
-          timetable[className][day].push([period, lesson.subjectName]);
+          if (!timetable[className]) timetable[className] = {};
+          if (!timetable[className][day]) timetable[className][day] = {};
+
+          if (timetable[className][day][period]) {
+            // Already exists → append with comma
+            timetable[className][day][period] += ',' + lesson.subjectName;
+          } else {
+            // Doesn't exist → set directly
+            timetable[className][day][period] = lesson.subjectName;
+          }
         });
       }
     });
 
     // Store results globally
     classList = Object.keys(timetable).sort();
+    
+    console.log(timetable["25S56"]);
     Timetable = timetable;
   }
 

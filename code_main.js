@@ -21,7 +21,7 @@ function doGet() {
       console.error('Config parse error:', e);
     }
   }
-
+  
   if (needsInit) {
     return HtmlService.createTemplateFromFile('initialise')
       .evaluate()
