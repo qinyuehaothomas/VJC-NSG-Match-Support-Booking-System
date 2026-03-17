@@ -1,7 +1,7 @@
 <script>
   // Global variables to hold parsed timetable and class list
-  let Timetable = null;
-  let classList;
+  var Timetable = null;
+  var classList = [];
 
   // Break periods – lessons with these subject names are ignored
   let BREAK_NAME = [
@@ -75,13 +75,13 @@
    */
   function processXml(xmlDoc) {
     // Build subject and class maps from their respective tags
-    const subjects = new Map(
+    var subjects = new Map(
       [...xmlDoc.getElementsByTagName('subject')].map(s => [
         s.getAttribute('id'),
         s.getAttribute('name')
       ])
     );
-    const classes = new Map(
+    var classes = new Map(
       [...xmlDoc.getElementsByTagName('class')].map(c => [
         c.getAttribute('id'),
         c.getAttribute('name')
@@ -89,15 +89,15 @@
     );
 
     // Map lesson ID -> {classNames: string[], subjectName: string}
-    const lessons = new Map();
+    var lessons = new Map();
     [...xmlDoc.getElementsByTagName('lesson')].forEach(lesson => {
       // classids may contain multiple comma‑separated IDs
-      const classNames = lesson
+      var classNames = lesson
         .getAttribute('classids')
         .split(',')
         .map(id => classes.get(id.trim()))
         .filter(Boolean);
-      const subjectName = subjects.get(lesson.getAttribute('subjectid'));
+      var subjectName = subjects.get(lesson.getAttribute('subjectid'));
 
       // Skip break periods (subject name in BREAK_NAME array)
       if (BREAK_NAME.includes(subjectName)) return;
@@ -108,23 +108,22 @@
     });
 
     // Timetable structure: className -> week -> day (0-4) -> [ [period, subjectName] ]
-    const timetable = {};
+    var timetable = {};
 
     [...xmlDoc.getElementsByTagName('card')].forEach(card => {
-      const lesson = lessons.get(card.getAttribute('lessonid'));
+      var lesson = lessons.get(card.getAttribute('lessonid'));
       if (!lesson) return;
 
-      const period = parseInt(card.getAttribute('period'));
-      const week = card.getAttribute('weeks');           // e.g. "1" or "1,2,3"
-      const day = card.getAttribute('days').indexOf('1'); // 0 = Monday, 4 = Friday
+      var period = parseInt(card.getAttribute('period'));
+      var week = card.getAttribute('weeks');           // e.g. "1" or "1,2,3"
+      var day = card.getAttribute('days').indexOf('1'); // 0 = Monday, 4 = Friday
       if (day === undefined) return;
 
       if (week=="10") day+=7;
 
       // Update once      
       lesson.classNames.forEach(className => {
-        if (!timetable[className]) timetable[className] = {};
-        if (!timetable[className][day]) timetable[className][day] = [];
+        if (!timetable[className]) timetable[className] = Array(14).fill([]);
 
         timetable[className][day].push([period, lesson.subjectName]);
       });
@@ -133,8 +132,7 @@
         day+=7;
         // Update Even Week for Common Scheudle
         lesson.classNames.forEach(className => {
-          if (!timetable[className]) timetable[className] = {};
-          if (!timetable[className][day]) timetable[className][day] = [];
+        if (!timetable[className]) timetable[className] = Array(14).fill([]);
           timetable[className][day].push([period, lesson.subjectName]);
         });
       }
@@ -192,6 +190,6 @@
       .withFailureHandler(error => {
         statusDiv.innerHTML = '<span style="color:red;">Error: ' + error.message + '</span>';
       })
-      .initialise(classes, sports, termDate, timetable);
+      .initialisation(classes, sports, termDate, timetable);
   }
 </script>

@@ -5,16 +5,15 @@
  */
 function doGet() {
   const props = PropertiesService.getScriptProperties();
-  const configJson = props.getProperty('config');
+  const configYear = props.getProperty('year');
   const currentYear = new Date().getFullYear().toString();
 
   let needsInit = true;
 
   // Check Year
-  if (configJson) {
+  if (configYear) {
     try {
-      const config = JSON.parse(configJson);
-      if (config.year === currentYear) {
+      if (configYear === currentYear) {
         needsInit = false;
       }
     } catch (e) {
@@ -24,7 +23,8 @@ function doGet() {
   }
 
   if (needsInit) {
-    return HtmlService.createHtmlOutputFromFile('initialise')
+    return HtmlService.createTemplateFromFile('initialise')
+      .evaluate()
       .setTitle('Initialise Match Support System')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -37,21 +37,7 @@ function doGet() {
   }
 }
 
-/**
- * Empty endpoint for initialisation form submission.
- * You will later implement the logic to save classes, sports, term date,
- * and timetable data, and then store the current year in config.
- */
-function initialise(classes, sports, termDate, timetable) {
-  // TODO: Save the provided data to your spreadsheet(s)
-  // and store the current year in config.
 
-  // Example: save config with current year
-  const config = {
-    year: new Date().getFullYear().toString()
-  };
-  PropertiesService.getScriptProperties().setProperty('config', JSON.stringify(config));
-
-  // Return something (optional) – the client expects a success response.
-  return;
+function include(filename) {
+return HtmlService.createTemplateFromFile(filename).evaluate().getContent();
 }

@@ -15,31 +15,33 @@ const CLASS_PREFERENCE_SHEET_NAME="Class Preference";
 const MATCH_DETAIL_SHEET_NAME="Match Details";
 
 function initialisation(classes, sports, termStartDate, timetableData) {
+  Logger.log("Initialisation Begins!");
   try {
     var year = new Date().getFullYear();
 
     // Step 1: Create master spreadsheet
     var spreadsheetId = createMasterSpreadsheet(classes, timetableData, year);
+    
+    Logger.log("SpreadsheetId",spreadsheetId);
 
     // Step 2: Create Class Preference form and link to master
     var prefFormId = createClassPreferenceForm(classes, sports, spreadsheetId, year);
+    Logger.log("pref ID",prefFormId);
 
     // Step 3: Create Match Info Update form and link to master
     var matchFormId = createMatchUpdateForm(sports, spreadsheetId, year);
-
-    // Step 4: Save config to script properties
-    var config = {
-      year:          year,
-      termStartDate: termStartDate,
-      classes:       classes,
-      sports:        sports,
-      spreadsheetId: spreadsheetId,
-      forms: {
-        classPreference: prefFormId,
-        matchUpdate:     matchFormId
-      }
-    };
-    saveConfig(config);
+    Logger.log("match ID",matchFormId);
+    
+    const props = PropertiesService.getScriptProperties();
+    
+    props.setProperty('year', year.toString());
+    props.setProperty('termStartDate', termStartDate.toString());
+    Logger.log(termStartDate);
+    props.setProperty('classes', classes.toString());
+    props.setProperty('sports', sports.toString());
+    props.setProperty('spreadsheetId', spreadsheetId);
+    props.setProperty('classPreferenceFormId', prefFormId);
+    props.setProperty('matchUpdateFormId', matchFormId);
 
     // Step 5: Schedule async rename of form response sheets (avoids sleep delays)
     scheduleFormSheetRename();
@@ -48,7 +50,7 @@ function initialisation(classes, sports, termStartDate, timetableData) {
     return { success: true, spreadsheetId: spreadsheetId, prefFormId: prefFormId, matchFormId: matchFormId };
 
   } catch (e) {
-    // Return failure details to client
+    // throw new Error("Init Failed!",e.messgae);
     return { success: false, error: e.message };
   }
 }
@@ -58,6 +60,7 @@ function initialisation(classes, sports, termStartDate, timetableData) {
 // Create Master Spreadsheet
 // ---------------------------------------------------------------------------
 function createMasterSpreadsheet(classes, timetableData, year) {
+  // throw new Error(timetableData);
   var ss = SpreadsheetApp.create(year + ' VJC NSG Allocation System Database');
 
   // ── Allocation tab ───────────────────────────────────────────────────────
@@ -72,7 +75,8 @@ function createMasterSpreadsheet(classes, timetableData, year) {
   // Rows 2–15: one row per day (Day 0 to Day 13), displayed as Day 1 to Day 14
   // Column 1: day names, Columns 2–30: periods 0–28
   // Cells contain lesson name; multiple lessons in same period are comma-separated
-  classes.forEach(function(className) {
+  Object.entries(timetableData).forEach(([className,classLessons])=> {
+    // throw new Error(className,classLessons);
     var classSheet = ss.insertSheet(className + ' Timetable');
 
     // Build heading row: ["Day", "Period 0", "Period 1", ..., "Period 28"]
@@ -82,46 +86,16 @@ function createMasterSpreadsheet(classes, timetableData, year) {
     }
     classSheet.appendRow(headingRow);
 
-    // Build 14 day rows (Day 0 to Day 13)
-    // grid[day][period] holds an array of lesson names (for comma-join)
-    var grid = [];
-    for (var d = 0; d < 14; d++) {
-      grid[d] = [];
-      for (var p = 0; p <= 28; p++) {
-        grid[d][p] = [];
-      }
-    }
-
     // Populate grid from timetable data
-    // timetableData format: { className: { days: [ [period, lesson], ... ] } }
-    if (timetableData[className] && timetableData[className].days) {
-      var classDays = timetableData[className].days;
-      
-      // Iterate through each day (0-13)
-      for (var d = 0; d < classDays.length && d < 14; d++) {
-        var dayLessons = classDays[d];
-        
-        // dayLessons is an array of [period, lesson] tuples
-        if (Array.isArray(dayLessons)) {
-          for (var i = 0; i < dayLessons.length; i++) {
-            var tuple = dayLessons[i];
-            var period = tuple[0]; // 0-indexed
-            var lesson = tuple[1];
-            
-            if (period >= 0 && period <= 28) {
-              grid[d][period].push(lesson);
-            }
-          }
-        }
-      }
-    }
+    // timetableData format: { className: [[lesson 1, lesson 2],[...],[...],...] }
 
     // Write each day row to the sheet
     for (var d = 0; d < 14; d++) {
-      var dataRow = ['Day ' + (d + 1)]; // Display as Day 1 to Day 14
-      for (var p = 0; p <= 28; p++) {
-        dataRow.push(grid[d][p].join(', ')); // comma-separated if multiple lessons
-      }
+      var dataRow = Array(30).fill(String());
+      dataRow[0]='Day ' + (d + 1); // Display as Day 1 to Day 14
+      classLessons.forEach((idx, lesson_name)=>{
+        dataRow[idx]+= dataRow[idx]?","+lesson_name:lesson_name;
+      });
       classSheet.appendRow(dataRow);
     }
   });
@@ -236,12 +210,12 @@ function scheduleFormSheetRename() {
 // Finds each form's response sheet by form ID and renames it to the correct tab name
 // Then deletes the placeholder tabs created during spreadsheet setup
 function renameFormResponseSheets() {
-  var config = loadConfig();
-  var ss     = SpreadsheetApp.openById(config.spreadsheetId);
-
+  
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const config = scriptProperties.getProperties();
   // Rename the form response sheets using form ID (stable, not dependent on tab name)
-  getFormResponseSheet(ss, config.forms.classPreference).setName(CLASS_PREFERENCE_SHEET_NAME);
-  getFormResponseSheet(ss, config.forms.matchUpdate).setName(MATCH_DETAIL_SHEET_NAME);
+  getFormResponseSheet(ss, config["classPreferenceFormId"]).setName(CLASS_PREFERENCE_SHEET_NAME);
+  getFormResponseSheet(ss, config["matchUpdateFormId"]).setName(MATCH_DETAIL_SHEET_NAME);
 
   // Clean up this trigger so it does not run again
   ScriptApp.getProjectTriggers().forEach(function(trigger) {
