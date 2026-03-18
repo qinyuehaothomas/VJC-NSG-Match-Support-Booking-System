@@ -11,8 +11,11 @@
 // Main initialisation function — called from client
 // ---------------------------------------------------------------------------
 
-const CLASS_PREFERENCE_SHEET_NAME="Class Preference";
-const MATCH_DETAIL_SHEET_NAME="Match Details";
+
+const CLASS_PREFERENCE_SHEET_NAME = "Class Preference";
+const MATCH_UPDATE_SHEET_NAME = "Match Update";
+const MATCH_INFO_SHEET_NAME = "Match Info";
+const ALLOCATION_SHEET_NAME = "Allocation";
 
 function initialisation(classes, sports, termStartDate, timetableData) {
   Logger.log("Initialisation Begins!");
@@ -37,16 +40,11 @@ function initialisation(classes, sports, termStartDate, timetableData) {
     props.setProperty('year', year.toString());
     props.setProperty('termStartDate', termStartDate.toString());
     props.setProperty('classes', classes.toString());
-    props.setProperty('sports', sports.toString());
+    props.setProperty('sports', sports.toString())
     props.setProperty('spreadsheetId', spreadsheetId);
-    props.setProperty('classPreferenceFormId', prefFormId);
-    props.setProperty('matchUpdateFormId', matchFormId);
 
     // Step 4: Create form submission triggers
     createFormSubmissionTriggers(prefFormId, matchFormId);
-
-    // Step 5: Schedule async rename of form response sheets (avoids sleep delays)
-    scheduleFormSheetRename();
 
     // Return success to client
     return { success: true, spreadsheetId: spreadsheetId, prefFormId: prefFormId, matchFormId: matchFormId };
@@ -69,8 +67,13 @@ function createMasterSpreadsheet(classes, timetableData, year) {
   // ── Allocation tab ───────────────────────────────────────────────────────
   // Stores final decisions: one row per class-match pairing
   var allocationSheet = ss.getSheetByName('Sheet1'); // rename the default sheet
-  allocationSheet.setName('Allocation');
-  allocationSheet.appendRow(['Class', 'Match']);
+  allocationSheet.setName(ALLOCATION_SHEET_NAME);
+  allocationSheet.appendRow(['Class', 'Sport', 'Match Level']);
+
+  // ── Match Info tab ───────────────────────────────────────────────────────
+  // Stores consolidated match information (updated from Match Update form responses)
+  var matchInfoSheet = ss.insertSheet(MATCH_INFO_SHEET_NAME);
+  matchInfoSheet.appendRow(['Sport', 'Match Level', 'Venue', 'Num Classes', 'Date', 'Leave Time', 'Return Time', 'Cancelled']);
 
   // ── One timetable tab per class ──────────────────────────────────────────
   // Tab name: "<ClassName> Timetable"
@@ -111,6 +114,7 @@ function createMasterSpreadsheet(classes, timetableData, year) {
   
   });
 
+  Logger.log("Master sheet Successful");
   return ss.getId();
 }
 
@@ -129,14 +133,14 @@ function createClassPreferenceForm(classes, sports, spreadsheetId, year) {
       .setRequired(true);
 
   // Q2 — Sport ranking grid
-  // Rows = sports, Columns = rank numbers (1 to n)
+  // Rows = sports, Columns = rank numbers (1 to 10)
   // "Require one response per row" and "Limit to one response per column"
   // ensures each sport gets a unique rank
-  var rankLabels = sports.map(function(_, i) { return String(i + 1); });
+  var rankLabels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
   var rankGrid   = form.addGridItem();
-  rankGrid.setTitle('Rank each sport (1 = most preferred, no duplicates)')
-          .setRows(sports)
-          .setColumns(rankLabels)
+  rankGrid.setTitle('Rank each sport (1 = most preferred, up to 10th)')
+          .setRows(rankLabels)
+          .setColumns(sports)
           .setRequired(true);
   try {
     rankGrid.setValidation(
@@ -156,6 +160,13 @@ function createClassPreferenceForm(classes, sports, spreadsheetId, year) {
 
   // Link form responses to the master spreadsheet
   form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheetId);
+  
+  // Brief delay to ensure response sheet is created
+  Utilities.sleep(500);
+  
+  // Rename response sheet
+  var ss = SpreadsheetApp.openById(spreadsheetId);
+  getFormResponseSheet(ss, form.getId()).setName(CLASS_PREFERENCE_SHEET_NAME);
 
   return form.getId();
 }
@@ -168,74 +179,60 @@ function createMatchUpdateForm(sports, spreadsheetId, year) {
   var form = FormApp.create(year + ' NSG Match Info Update');
   form.setDescription('Use this form to add or update NSG match details.');
 
-  // Q1 — Match name (short answer, required)
-  form.addTextItem()
-      .setTitle('Match Name')
-      .setRequired(true);
-
-  // Q2 — Sport (multiple choice from sports list, required)
-  form.addMultipleChoiceItem()
+  // Q1 — Sport (multiple choice from sports list, required)
+  form.addListItem()
       .setTitle('Sport')
       .setChoiceValues(sports)
       .setRequired(true);
 
-  // Q3 — Estimated number of classes attending (short answer, required)
+  // Q2 — Match Level
+  form.addMultipleChoiceItem()
+      .setTitle('Match Level')
+      .setChoiceValues(["Finals","Semi-Finals","3rd/ 4th"])
+      .setRequired(true);
+
+  // Q3 — Venue (short answer, NOT required)
+  form.addTextItem()
+      .setTitle('Venue')
+      .setRequired(false);
+
+  // Q4 — Estimated number of classes attending (short answer, NOT required)
   form.addTextItem()
       .setTitle('Estimated Number of Classes')
-      .setRequired(true);
+      .setRequired(false);
 
-  // Q4 — Match date (date picker, required)
+  // Q5 — Match date (date picker, NOT required)
   form.addDateItem()
       .setTitle('Date')
-      .setRequired(true);
+      .setRequired(false);
 
-  // Q5 — Estimated leave time (time picker, required)
+  // Q6 — Estimated leave time (time picker, NOT required)
   form.addTimeItem()
       .setTitle('Estimated Leave Time')
-      .setRequired(true);
+      .setRequired(false);
 
-  // Q6 — Estimated return time (time picker, required)
+  // Q7 — Estimated return time (time picker, NOT required)
   form.addTimeItem()
       .setTitle('Estimated Return Time')
-      .setRequired(true);
+      .setRequired(false);
+
+  // Q8 — Cancelled (checkbox, NOT required)
+  form.addCheckboxItem()
+      .setTitle('Is this match cancelled?')
+      .setChoiceValues(['Yes'])
+      .setRequired(false);
 
   // Link form responses to the master spreadsheet
   form.setDestination(FormApp.DestinationType.SPREADSHEET, spreadsheetId);
+  
+  // Brief delay to ensure response sheet is created
+  Utilities.sleep(500);
+  
+  // Rename response sheet
+  var ss = SpreadsheetApp.openById(spreadsheetId);
+  getFormResponseSheet(ss, form.getId()).setName(MATCH_UPDATE_SHEET_NAME);
 
   return form.getId();
-}
-
-
-// ---------------------------------------------------------------------------
-// Schedule async renaming of form response sheets
-// Runs 2 minutes after initialisation, avoids blocking the main function with sleep()
-// ---------------------------------------------------------------------------
-function scheduleFormSheetRename() {
-  ScriptApp.newTrigger('renameFormResponseSheets')
-    .timeBased()
-    .after(2 * 60 * 1000) // 2 minutes in milliseconds
-    .create();
-}
-
-// Triggered ~2 minutes after initialisation
-// Finds each form's response sheet by form ID and renames it to the correct tab name
-// Then deletes the placeholder tabs created during spreadsheet setup
-function renameFormResponseSheets() {
-  const props = PropertiesService.getScriptProperties();
-
-  // Get a single property
-  const spreadsheetId = props.getProperty('spreadsheetId');
-  const ss=SpreadsheetApp.openById(spreadsheetId)
-  // Rename the form response sheets using form ID (stable, not dependent on tab name)
-  getFormResponseSheet(ss, props.getProperty("classPreferenceFormId")).setName(CLASS_PREFERENCE_SHEET_NAME);
-  getFormResponseSheet(ss, props.getProperty("matchUpdateFormId")).setName(MATCH_DETAIL_SHEET_NAME);
-
-  // Clean up this trigger so it does not run again
-  ScriptApp.getProjectTriggers().forEach(function(trigger) {
-    if (trigger.getHandlerFunction() === 'renameFormResponseSheets') {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
 }
 
 // Returns the sheet in ss whose linked form URL contains the given formId
@@ -249,6 +246,7 @@ function getFormResponseSheet(ss, formId) {
   }
   throw new Error('No response sheet found for form ID: ' + formId);
 }
+
 
 // ---------------------------------------------------------------------------
 // Form submission triggers — called automatically on form submit
@@ -292,8 +290,73 @@ function onClassPreferenceSubmit(e) {
 function onMatchUpdateSubmit(e) {
   Logger.log('Match Update form submitted');
   try {
+    updateMatchInfo(e);
     allocation();
   } catch (error) {
     Logger.log('Error in onMatchUpdateSubmit: ' + error.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Update Match Info sheet from latest Match Update submission
+// ---------------------------------------------------------------------------
+function updateMatchInfo(e) {
+  try {
+    // Extract form response answers
+    const itemResponses = e.response.getItemResponses();
+    
+    // Map answers: Q1=Sport(0), Q2=MatchLevel(1), Q3=Venue(2), Q4=NumClasses(3), Q5=Date(4), Q6=LeaveTime(5), Q7=ReturnTime(6), Q8=Cancelled(7)
+    const sport = itemResponses[0] ? itemResponses[0].getResponse() : null;
+    const matchLevel = itemResponses[1] ? itemResponses[1].getResponse() : null;
+    const venue = itemResponses[2] ? itemResponses[2].getResponse() : '';
+    const numClasses = itemResponses[3] ? itemResponses[3].getResponse() : '';
+    const date = itemResponses[4] ? itemResponses[4].getResponse() : '';
+    const leaveTime = itemResponses[5] ? itemResponses[5].getResponse() : '';
+    const returnTime = itemResponses[6] ? itemResponses[6].getResponse() : '';
+    const cancelled = (itemResponses[7] && itemResponses[7].getResponse().length > 0) ? 'Yes' : 'No';
+    
+    if (!sport || !matchLevel) {
+      Logger.log('Sport or Match Level missing in submission');
+      return;
+    }
+    
+    const props = PropertiesService.getScriptProperties();
+    const spreadsheetId = props.getProperty('spreadsheetId');
+    
+    if (!spreadsheetId) {
+      throw new Error('SpreadsheetId not found in properties');
+    }
+    
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const infoSheet = ss.getSheetByName(MATCH_INFO_SHEET_NAME);
+    
+    if (!infoSheet) {
+      throw new Error('Match Info sheet not found');
+    }
+    
+    // Get all rows from Match Info sheet
+    const infoData = infoSheet.getDataRange().getValues();
+    
+    // Find matching row by Sport + Match Level (composite key)
+    let matchRowIndex = -1;
+    for (let i = 1; i < infoData.length; i++) {
+      if (infoData[i][0] === sport && infoData[i][1] === matchLevel) {
+        matchRowIndex = i + 1; // Convert to 1-based row number
+        break;
+      }
+    }
+    
+    if (matchRowIndex === -1) {
+      // New match, append as new row
+      infoSheet.appendRow([sport, matchLevel, venue, numClasses, date, leaveTime, returnTime, cancelled]);
+      Logger.log('Added new match: ' + sport + ' - ' + matchLevel);
+    } else {
+      // Update existing match (columns 3-8: venue, numClasses, date, leaveTime, returnTime, cancelled)
+      infoSheet.getRange(matchRowIndex, 3, 1, 6).setValues([[venue, numClasses, date, leaveTime, returnTime, cancelled]]);
+      Logger.log('Updated match: ' + sport + ' - ' + matchLevel);
+    }
+    
+  } catch (e) {
+    Logger.log('updateMatchInfo failed: ' + e.message);
   }
 }

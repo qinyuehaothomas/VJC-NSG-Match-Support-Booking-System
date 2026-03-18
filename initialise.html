@@ -4,16 +4,30 @@
     <base target="_top">
   </head>
   <body>
-    <h1>Nah</h1>
     <h2>Timetable & Match Setup</h2>
 
     <!-- Text field 1: sport names (one per line) -->
     <label for="sports">Sports (one per line):</label><br>
-    <textarea id="sports" rows="5" cols="30" placeholder="e.g.&#10;Basketball Boys&#10;Basketball Girls&#10;Netball">
-      Basketball Boys
-      Basketball Girls
-      Football
-      Volleyball
+    <textarea id="sports" rows="30" cols="30" placeholder="e.g.&#10;Basketball Boys&#10;Basketball Girls&#10;Netball">
+Floorball Boys
+Floorball Girls
+Football Boys
+Football Girls
+Hockey Boys
+Hockey Girls
+Badminton Boys
+Badminton Girls
+Volleyball Boys
+Volleyball Girls
+Tennis Boys
+Tennis Girls
+Basketball Boys
+Basketball Girls
+Wushu
+Netball
+Swimming
+Track and Field
+Cross Country
     </textarea>
     <br><br>
 
@@ -25,11 +39,11 @@
 
     <!-- Field 3: Date for Term 2 Week 1 Day 1 -->
     <label for="termDate" >Term 2 Week 1 Monday date:</label>
-    <input type="date" id="termDate" value="2026-03-20">
+    <input type="date" id="termDate" value="2026-03-23">
     <br><br>
     <br>
 
-    <button onclick="sendInitialise()">Initialise System</button>
+    <button onclick="sendInitialise(this)">Initialise System</button>
     <br>
     <div id="Status"></div>
 

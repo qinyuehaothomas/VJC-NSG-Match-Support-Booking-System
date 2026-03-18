@@ -164,16 +164,39 @@
    * Collects all inputs and sends them to the server‑side 'initialise' function.
    * Called when the "Initialise System" button is clicked.
    */
-  function sendInitialise() {
+  function sendInitialise(submitButton) {
+    // Disable the submit button to prevent multiple submissions
+    submitButton.disabled = true;
+
     // Get classes from the global classList (populated by XML processing)
     const classes = classList;
 
-    // Get sports from textarea (one per line)
+    // Get sports from textarea, remove empty lines and trailing whitespace
     const sportsText = document.getElementById('sports').value;
-    const sports = sportsText
+    const sportsArray = sportsText
       .split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0);
+
+    // Deduplicate sports (case-insensitive comparison)
+    const seen = new Set();
+    const sports = [];
+    const duplicatesFound = [];
+
+    sportsArray.forEach(sport => {
+      const sportLower = sport.toLowerCase();
+      if (seen.has(sportLower)) {
+        duplicatesFound.push(sport);
+      } else {
+        seen.add(sportLower);
+        sports.push(sport);
+      }
+    });
+
+    // Alert user if duplicates were found
+    if (duplicatesFound.length > 0) {
+      alert('Removed ' + duplicatesFound.length + ' duplicate sport(s):\n' + duplicatesFound.join(', '));
+    }
 
     // Get date from date picker
     const termDate = document.getElementById('termDate').value;
@@ -181,22 +204,27 @@
     // Get the parsed timetable data
     const timetable = Timetable;
 
+    // Get status div for feedback
+    const statusDiv = document.getElementById('Status');
+
     // Basic validation
     if (sports.length === 0) {
       alert('Please enter at least one sport.');
+      submitButton.disabled = false;
       return;
     }
     if (!termDate) {
       alert('Please select a date.');
+      submitButton.disabled = false;
       return;
     }
     if (!timetable) {
       alert('Please Upload Timetable !');
+      submitButton.disabled = false;
       return;
     }
 
     // Show sending feedback
-    const statusDiv = document.getElementById('Status');
     statusDiv.innerHTML = '<span style="color:blue;">Initialising...</span>';
 
     // Call the server‑side 'initialise' function
@@ -206,6 +234,7 @@
       })
       .withFailureHandler(error => {
         statusDiv.innerHTML = '<span style="color:red;">Error: ' + error.message + '</span>';
+        submitButton.disabled = false;
       })
       .initialisation(classes, sports, termDate, timetable);
   }
