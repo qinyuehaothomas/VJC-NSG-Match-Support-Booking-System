@@ -16,6 +16,9 @@ const CLASS_PREFERENCE_SHEET_NAME = "Class Preference";
 const MATCH_UPDATE_SHEET_NAME = "Match Update";
 const MATCH_INFO_SHEET_NAME = "Match Info";
 const ALLOCATION_SHEET_NAME = "Allocation";
+const DISPLAY_BY_CLASS_NAME = "Display By Class";
+const DISPLAY_BY_EVENT_NAME = "Display By Event";
+
 
 function initialisation(classes, sports, termStartDate, timetableData) {
   Logger.log("Initialisation Begins!");
@@ -75,12 +78,26 @@ function createMasterSpreadsheet(classes, timetableData, year) {
   var matchInfoSheet = ss.insertSheet(MATCH_INFO_SHEET_NAME);
   matchInfoSheet.appendRow(['Sport', 'Match Level', 'Venue', 'Num Classes', 'Date', 'Leave Time', 'Return Time', 'Cancelled']);
 
+  
+
+  // ── Display By Class tab ───────────────────────────────────────────────────────
+  // Display Events for each class
+  var matchInfoSheet = ss.insertSheet(DISPLAY_BY_CLASS_NAME);
+  matchInfoSheet.appendRow(["Class", 'Sport', 'Match Level', 'Venue', 'Date', 'Leave Time', 'Return Time']);
+
+  // ── Display By Event tab ───────────────────────────────────────────────────────
+  // Display Class going to each event
+  var matchInfoSheet = ss.insertSheet(DISPLAY_BY_EVENT_NAME);
+  matchInfoSheet.appendRow(['Sport', 'Match Level', "Class",'Venue', 'Date', 'Leave Time', 'Return Time']);
+
   // ── One timetable tab per class ──────────────────────────────────────────
   // Tab name: "<ClassName> Timetable"
   // Row 1 (header): ["Day", "Period 0", "Period 1", ..., "Period 28"]
   // Rows 2–15: one row per day (Day 0 to Day 13), displayed as Day 1 to Day 14
   // Column 1: day names, Columns 2–30: periods 0–28
   // Cells contain lesson name; multiple lessons in same period are comma-separated
+
+  /*
   Object.entries(timetableData).forEach(([className,classLessons])=> {
 
     var classSheet = ss.insertSheet(className + ' Timetable');
@@ -113,10 +130,12 @@ function createMasterSpreadsheet(classes, timetableData, year) {
       }
   
   });
+  */
 
   Logger.log("Master sheet Successful");
   return ss.getId();
 }
+
 
 
 // ---------------------------------------------------------------------------
@@ -351,8 +370,15 @@ function updateMatchInfo(e) {
       infoSheet.appendRow([sport, matchLevel, venue, numClasses, date, leaveTime, returnTime, cancelled]);
       Logger.log('Added new match: ' + sport + ' - ' + matchLevel);
     } else {
-      // Update existing match (columns 3-8: venue, numClasses, date, leaveTime, returnTime, cancelled)
-      infoSheet.getRange(matchRowIndex, 3, 1, 6).setValues([[venue, numClasses, date, leaveTime, returnTime, cancelled]]);
+      // Update existing match - use new value if provided, otherwise keep old value
+      const oldRow = infoData[matchRowIndex - 1];
+      const newVenue = venue || oldRow[2];
+      const newNumClasses = numClasses || oldRow[3];
+      const newDate = date || oldRow[4];
+      const newLeaveTime = leaveTime || oldRow[5];
+      const newReturnTime = returnTime || oldRow[6];
+      
+      infoSheet.getRange(matchRowIndex, 3, 1, 6).setValues([[newVenue, newNumClasses, newDate, newLeaveTime, newReturnTime, cancelled]]);
       Logger.log('Updated match: ' + sport + ' - ' + matchLevel);
     }
     

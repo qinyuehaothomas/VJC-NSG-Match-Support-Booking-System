@@ -1,5 +1,5 @@
 // Constants
-const MAX_MATCHES_PER_CLASS = 2;
+const MAX_MATCHES_PER_CLASS = 4;
 const MIN_CLASSES_PER_MATCH = 5;
 const DEFAULT_MATCH_CAPACITY = 300;
 
@@ -12,6 +12,8 @@ function allocation() {
     const matchDetails = readMatchDetails(ss);
     const allocations = runAllocationAlgorithm(classPrefs, matchDetails, ss);
     writeAllocationsToSheet(ss, allocations);
+    updateDisplayByClass(ss,allocations,matchDetails);
+    updateDisplayByEvent(ss,allocations,matchDetails);
     return { success: true, message: 'Allocation completed' };
   } catch (e) {
     Logger.log("Allocation failed: " + e.message);
@@ -74,14 +76,6 @@ function runAllocationAlgorithm(classPrefs, matchDetails, ss) {
   
   const today = new Date();
   
-  // Deduplicate input by class name - same class only appears once
-  const seenClasses = new Set();
-  const uniquePrefs = classPrefs.filter(p => {
-    if (seenClasses.has(p.class)) return false;
-    seenClasses.add(p.class);
-    return true;
-  });
-  
   // Get past allocations and future matches
   const determined = getDeterminedAllocations(ss, matchDetails, today);
   const future = matchDetails.filter(m => m.cancelled !== 'Yes' && new Date(m.date) >= today);
@@ -89,7 +83,7 @@ function runAllocationAlgorithm(classPrefs, matchDetails, ss) {
   // Initialize tracking: class -> count, match -> classes assigned
   const classCount = {};
   const matchAlloc = {};
-  uniquePrefs.forEach(p => classCount[p.class] = 0);
+  classPrefs.forEach(p => classCount[p.class] = 0);
   future.forEach(m => matchAlloc[m.sport + '|' + m.matchLevel] = []);
   
   // Add determined (past) allocations to current tracking
@@ -101,7 +95,7 @@ function runAllocationAlgorithm(classPrefs, matchDetails, ss) {
   });
   
   // Build score matrix: class -> sport -> score
-  const scores = buildScoreMatrix(uniquePrefs);
+  var scores = buildScoreMatrix(classPrefs);
   
   // Sort matches by capacity ascending (fill smallest first)
   const sorted = future.sort((a, b) => (parseInt(a.numClasses) || DEFAULT_MATCH_CAPACITY) - (parseInt(b.numClasses) || DEFAULT_MATCH_CAPACITY));
@@ -112,12 +106,13 @@ function runAllocationAlgorithm(classPrefs, matchDetails, ss) {
     const cap = parseInt(m.numClasses) || DEFAULT_MATCH_CAPACITY;
     
     while (matchAlloc[k].length < cap) {
-      const best = uniquePrefs
+      const best = classPrefs
         .filter(p => classCount[p.class] < MAX_MATCHES_PER_CLASS && !matchAlloc[k].includes(p.class))
         .sort((a, b) => (scores[b.class]?.[m.sport] || 0) - (scores[a.class]?.[m.sport] || 0))[0];
       
       if (!best) break;
       matchAlloc[k].push(best.class);
+      scores[best.class][m.sport]/=2;
       classCount[best.class]++;
     }
   });
@@ -157,4 +152,94 @@ function buildScoreMatrix(prefs) {
     });
   });
   return matrix;
+}
+
+
+// Display By class
+function updateDisplayByEvent(ss, alloc, matchDetail) {
+  Logger.log("Update Display By Event");
+  const sheet = ss.getSheetByName(DISPLAY_BY_EVENT_NAME) || ss.insertSheet(DISPLAY_BY_EVENT_NAME);
+  if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
+
+  const eventMap = {};
+  const eventOrder = [];
+
+  for (const [className, sport, level] of alloc) {
+    const match = matchDetail.find(m => m.sport === sport && m.matchLevel === level);
+    if (!match) continue;
+
+    const key = `${sport}|${level}`;
+    if (!eventMap[key]) {
+      eventMap[key] = {
+        ...match,
+        classes: []
+      };
+      eventOrder.push(key);
+    }
+    eventMap[key].classes.push(className);
+  }
+
+  const rows = [];
+  for (const key of eventOrder) {
+    const ev = eventMap[key];
+    rows.push([
+      ev.sport,
+      ev.matchLevel,
+      ev.classes.join(', '),
+      ev.venue,
+      ev.date,
+      ev.leaveTime,
+      ev.returnTime,
+    ]);
+  }
+
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
+}
+
+
+/**
+ * Updates a sheet with matches grouped by class.
+ */
+function updateDisplayByClass(ss, alloc, matchDetail) {
+  Logger.log("Update Display By Class");
+  const sheet = ss.getSheetByName(DISPLAY_BY_CLASS_NAME) || ss.insertSheet(DISPLAY_BY_CLASS_NAME);
+  // Clear existing data (keep header row)
+  if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
+
+  const classMap = {};        // { className: [matchObj, ...] }
+  const classOrder = [];
+
+  for (const [className, sport, level] of alloc) {
+    const match = matchDetail.find(m => m.sport === sport && m.matchLevel === level);
+    if (!match) continue;
+
+    if (!classMap[className]) {
+      classMap[className] = [];
+      classOrder.push(className);
+    }
+    classMap[className].push(match);
+  }
+
+  const rows = [];
+  for (const className of classOrder) {
+    const matches = classMap[className];
+    rows.push([className,'','','','','','']);
+    matches.forEach((m, idx) => {
+      rows.push([
+        '',
+        m.sport,
+        m.matchLevel,
+        m.venue,
+        m.date,
+        m.leaveTime,
+        m.returnTime,
+      ]);
+    });
+  }
+
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  }
 }
